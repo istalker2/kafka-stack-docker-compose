@@ -1,6 +1,15 @@
 version: '2.1'
 
 services:
+  opa1:
+    hostname: opa1
+    image: openpolicyagent/opa:0.9.2-dev
+    ports:
+    - 8181:8181
+    command: "run --server --log-level=debug --watch /data/kafka_authz.rego"
+    volumes:
+    - ./files/opa/:/data
+
   zoo1:
     image: zookeeper:3.4.9
     restart: unless-stopped
@@ -17,20 +26,43 @@ services:
 
 
   kafka1:
-    image: confluentinc/cp-kafka:5.0.0
+    image: stanlagun/demo-kafka:latest
     hostname: kafka1
     ports:
       - "9092:9092"
+      - "9093:9093"
     environment:
-      KAFKA_ADVERTISED_LISTENERS: LISTENER_DOCKER_INTERNAL://kafka1:19092,LISTENER_DOCKER_EXTERNAL://${DOCKER_HOST_IP:-127.0.0.1}:9092
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: LISTENER_DOCKER_INTERNAL:PLAINTEXT,LISTENER_DOCKER_EXTERNAL:PLAINTEXT
-      KAFKA_INTER_BROKER_LISTENER_NAME: LISTENER_DOCKER_INTERNAL
       KAFKA_ZOOKEEPER_CONNECT: "zoo1:2181"
       KAFKA_BROKER_ID: 1
-      KAFKA_LOG4J_LOGGERS: "kafka.controller=INFO,kafka.producer.async.DefaultEventHandler=INFO,state.change.logger=INFO"
+      KAFKA_LOG4J_LOGGERS: "kafka.controller=INFO,kafka.producer.async.DefaultEventHandler=INFO,state.change.logger=INFO,kafka.authorizer.logger=DEBUG"
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTHORIZER_CLASS_NAME: com.lbg.kafka.opa.OpaAuthorizer
+      KAFKA_OPA_AUTHORIZER_URL: "http://opa1:8181/v1/data/kafka/authz/allow"
+      KAFKA_OPA_AUTHORIZER_ALLOW_ON_ERROR: "false"
+      KAFKA_OPA_AUTHORIZER_CACHE_INITIAL_CAPACITY: 100
+      KAFKA_OPA_AUTHORIZER_CACHE_MAXIMUM_SIZE: 100
+      KAFKA_OPA_AUTHORIZER_CACHE_EXPIRE_AFTER_MS: 600000
+      KAFKA_allow.everyone.if.no.acl.found: "true"
+      KAFKA_LISTENERS: PLAINTEXT://:9092,SSL://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://:9092,SSL://:9093
+      KAFKA_SECURITY_INTER_BROKER_PROTOCOL: SSL
+      KAFKA_ssl.protocol: TLS
+      KAFKA_SSL_CLIENT_AUTH: requested
+      KAFKA_ADVERTISED_HOST_NAME: kafka1
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: LISTENER_DOCKER_INTERNAL:PLAINTEXT,LISTENER_DOCKER_EXTERNAL:PLAINTEXT,LISTENER_DOCKER_INTERNAL:SSL,LISTENER_DOCKER_EXTERNAL:SSL,PLAINTEXT:PLAINTEXT,SSL:SSL
+      KAFKA_AUTHORIZER_CLASS_NAME: kafka.security.auth.SimpleAclAuthorizer
+      KAFKA_ssl.enabled.protocols: TLSv1.2,TLSv1.1,TLSv1
+      KAFKA_allow.everyone.if.no.acl.found: "true"
+      KAFKA_SSL_KEYSTORE_FILENAME: server.keystore.jks
+      KAFKA_SSL_KEYSTORE_CREDENTIALS: creds
+      KAFKA_SSL_KEY_CREDENTIALS: creds
+      KAFKA_SSL_TRUSTSTORE_FILENAME: server.truststore.jks
+      KAFKA_SSL_TRUSTSTORE_CREDENTIALS: creds
     volumes:
       - ./full-stack/kafka1/data:/var/lib/kafka/data
+      - ./files/secrets/creds:/etc/kafka/secrets/creds
+      - ./files/secrets/kafka1/server.truststore.jks:/etc/kafka/secrets/server.truststore.jks
+      - ./files/secrets/kafka1/server.keystore.jks:/etc/kafka/secrets/server.keystore.jks
     depends_on:
       - zoo1
 
